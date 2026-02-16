@@ -48,12 +48,18 @@ conn.commit()
 # AI MODEL + CAMERA
 # -------------------------------
 if os.environ.get("RENDER") != "true":
- model = YOLO("yolov8n.pt")
- cap = cv2.VideoCapture(0)
+    model = YOLO("yolov8n.pt")
+    cap = cv2.VideoCapture(0)
 
-FPS = int(cap.get(cv2.CAP_PROP_FPS) or 30)
-BUFFER_SECONDS = 10
-buffer = deque(maxlen=FPS * BUFFER_SECONDS)
+    FPS = int(cap.get(cv2.CAP_PROP_FPS) or 30)
+    BUFFER_SECONDS = 10
+    buffer = deque(maxlen=FPS * BUFFER_SECONDS)
+else:
+    # On Render we don't use camera
+    FPS = 30
+    BUFFER_SECONDS = 10
+    buffer = None
+
 
 # -------------------------------
 # STATE VARIABLES
