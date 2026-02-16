@@ -9,6 +9,26 @@ import threading
 import sqlite3
 import requests  # 🔥 ADDED
 from flask_cors import CORS
+from flask import request
+
+
+@app.route("/insert", methods=["POST"])
+def insert_event():
+    data = request.json
+
+    cursor.execute("""
+    INSERT INTO events (timestamp, status, clip_path, camera_id)
+    VALUES (?, ?, ?, ?)
+    """, (
+        data["timestamp"],
+        data["status"],
+        data.get("clip_path"),
+        data["camera_id"]
+    ))
+
+    conn.commit()
+    return {"success": True}
+
 
 
 # -------------------------------
