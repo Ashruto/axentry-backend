@@ -11,23 +11,19 @@ import requests  # 🔥 ADDED
 from flask_cors import CORS
 from flask import request
 
+# -------------------------------
+# FLASK SERVER
+# -------------------------------
+app = Flask(__name__)
+CORS(
+    app,
+    resources={r"/*": {"origins": [
+        "https://v0-axentry-saas.vercel.app"
+    ]}},
+    supports_credentials=True
+)
 
-@app.route("/insert", methods=["POST"])
-def insert_event():
-    data = request.json
 
-    cursor.execute("""
-    INSERT INTO events (timestamp, status, clip_path, camera_id)
-    VALUES (?, ?, ?, ?)
-    """, (
-        data["timestamp"],
-        data["status"],
-        data.get("clip_path"),
-        data["camera_id"]
-    ))
-
-    conn.commit()
-    return {"success": True}
 
 
 
@@ -76,11 +72,23 @@ status_display_until = 0
 
 os.makedirs("clips", exist_ok=True)
 
-# -------------------------------
-# FLASK SERVER
-# -------------------------------
-app = Flask(__name__)
-CORS(app)
+
+@app.route("/insert", methods=["POST"])
+def insert_event():
+    data = request.json
+
+    cursor.execute("""
+    INSERT INTO events (timestamp, status, clip_path, camera_id)
+    VALUES (?, ?, ?, ?)
+    """, (
+        data["timestamp"],
+        data["status"],
+        data.get("clip_path"),
+        data["camera_id"]
+    ))
+
+    conn.commit()
+    return {"success": True}
 
 
 @app.route("/scan", methods=["POST"])
