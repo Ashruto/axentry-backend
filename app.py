@@ -9,6 +9,8 @@ from flask_cors import CORS
 import threading
 import sqlite3
 import requests
+import cloudinary
+import cloudinary.uploader
 
 # -------------------------------
 # FLASK SERVER
@@ -17,9 +19,15 @@ import requests
 app = Flask(__name__)
 
 CORS(
-    app,
-    resources={r"/*": {"origins": ["https://v0-axentry-saas.vercel.app"]}},
-    supports_credentials=True,
+ app,
+ resources={r"/*": {"origins": ["https://v0-axentry-saas.vercel.app"]}},
+ supports_credentials=True,
+)
+
+cloudinary.config(
+ cloud_name="dcr5izjyl",
+ api_key="452727136399667",
+ api_secret="QpJ20kGjvV8yA_u_MI6ehxkyRY8"
 )
 
 # -------------------------------
@@ -31,11 +39,11 @@ cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT,
-    status TEXT,
-    clip_path TEXT,
-    camera_id TEXT
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ timestamp TEXT,
+ status TEXT,
+ clip_path TEXT,
+ camera_id TEXT
 )
 """)
 conn.commit()
@@ -45,16 +53,16 @@ conn.commit()
 # -------------------------------
 
 if os.environ.get("RENDER") != "true":
-    model = YOLO("yolov8n.pt")
-    cap = cv2.VideoCapture(0)
+ model = YOLO("yolov8n.pt")
+ cap = cv2.VideoCapture(0)
 
-    FPS = int(cap.get(cv2.CAP_PROP_FPS) or 30)
-    BUFFER_SECONDS = 10
-    buffer = deque(maxlen=FPS * BUFFER_SECONDS)
+ FPS = int(cap.get(cv2.CAP_PROP_FPS) or 30)
+ BUFFER_SECONDS = 10
+ buffer = deque(maxlen=FPS * BUFFER_SECONDS)
 else:
-    FPS = 30
-    BUFFER_SECONDS = 10
-    buffer = None
+ FPS = 30
+ BUFFER_SECONDS = 10
+ buffer = None
 
 # -------------------------------
 # STATE VARIABLES
@@ -80,69 +88,60 @@ os.makedirs("clips", exist_ok=True)
 
 @app.route("/insert", methods=["POST"])
 def insert_event():
-    data = request.json
+ data = request.json
 
-    cursor.execute("""
-    INSERT INTO events (timestamp, status, clip_path, camera_id)
-    VALUES (?, ?, ?, ?)
-    """, (
-        data["timestamp"],
-        data["status"],
-        data.get("clip_path"),
-        data["camera_id"]
-    ))
+ cursor.execute("""
+ INSERT INTO events (timestamp, status, clip_path, camera_id)
+ VALUES (?, ?, ?, ?)
+ """, (
+ data["timestamp"],
+ data["status"],
+ data.get("clip_path"),
+ data["camera_id"]
+ ))
 
-    conn.commit()
-    return {"success": True}
-
+ conn.commit()
+ return {"success": True}
 
 @app.route("/scan", methods=["POST"])
 def trigger_scan():
-    global scan_triggered
-    scan_triggered = True
-    return {"status": "scan received"}, 200
-
+ global scan_triggered
+ scan_triggered = True
+ return {"status": "scan received"}, 200
 
 @app.route("/events")
 def get_events():
-    cursor.execute("SELECT * FROM events ORDER BY id DESC")
-    rows = cursor.fetchall()
+ cursor.execute("SELECT * FROM events ORDER BY id DESC")
+ rows = cursor.fetchall()
 
-    return jsonify([
-        {
-            "id": r[0],
-            "timestamp": r[1],
-            "status": r[2],
-            "clip_path": r[3],
-            "camera_id": r[4]
-        } for r in rows
-    ])
-
-
-@app.route("/clips/<path:filename>")
-def serve_clip(filename):
-    return send_from_directory("clips", filename)
-
+ return jsonify([
+ {
+ "id": r[0],
+ "timestamp": r[1],
+ "status": r[2],
+ "clip_path": r[3],
+ "camera_id": r[4]
+ } for r in rows
+ ])
 
 @app.route("/dashboard")
 def dashboard():
-    return "Dashboard running"
-
+ return "Dashboard running"
 
 # -------------------------------
 # RUN SERVER (RENDER SIDE)
 # -------------------------------
 
 if os.environ.get("RENDER") == "true":
-    print("🌍 Running Render API server...")
+ print("🌍 Running Render API server...")
 else:
-    def run_server():
-        app.run(host="0.0.0.0", port=5055)
+ def run_server():
+  app.run(host="0.0.0.0", port=5055)
 
-    threading.Thread(target=run_server, daemon=True).start()
+ threading.Thread(target=run_server, daemon=True).start()
 
-    print("System Ready | Awaiting biometric scan on /scan")
-    print("Dashboard: http://localhost:5055/dashboard")
+print("System Ready | Awaiting biometric scan on /scan")
+print("Dashboard: http://localhost:5055/dashboard")
 
 # -------------------------------
 # MAIN LOOP (LOCAL ONLY)
@@ -150,55 +149,155 @@ else:
 
 if os.environ.get("RENDER") != "true":
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+ print("🚀 Local AI + Scan system running")
 
-        buffer.append(frame.copy())
+ while True:
+  ret, frame = cap.read()
+  if not ret:
+   break
 
-        results = model.track(frame, conf=0.5, classes=[0], persist=True, verbose=False)
+  h, w, _ = frame.shape
 
-        unauthorized_detected = False
+  dx1 = int(w * 0.25)
+  dx2 = int(w * 0.75)
+  dy1 = 0
+  dy2 = h
 
-        if results[0].boxes.id is not None:
-            if len(results[0].boxes.id.cpu().tolist()) > 1:
-                unauthorized_detected = True
+  buffer.append(frame.copy())
 
-        readable_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  # 🔵 Blue zone
+  cv2.rectangle(frame, (dx1, dy1), (dx2, dy2), (255, 0, 0), 2)
 
-        if unauthorized_detected:
-            print("❌ UNAUTHORIZED DETECTED")
+  results = model.track(frame, conf=0.5, classes=[0], persist=True, verbose=False)
 
-            requests.post(
-                "https://axentry-backend.onrender.com/insert",
-                json={
-                    "timestamp": readable_time,
-                    "status": "UNAUTHORIZED",
-                    "clip_path": None,
-                    "camera_id": "CAM_01"
-                }
-            )
+  ids = []
+  boxes = []
 
-        else:
-            print("✅ VERIFIED")
+  if results[0].boxes.id is not None:
+   ids = results[0].boxes.id.cpu().tolist()
+   boxes = results[0].boxes.xyxy.cpu().tolist()
 
-            requests.post(
-                "https://axentry-backend.onrender.com/insert",
-                json={
-                    "timestamp": readable_time,
-                    "status": "VERIFIED",
-                    "clip_path": None,
-                    "camera_id": "CAM_01"
-                }
-            )
+  valid_ids = set()
 
-        cv2.imshow("Axentry Access Verification", frame)
+  for box, tid in zip(boxes, ids):
+   x1, y1, x2, y2 = map(int, box)
+   cx = (x1 + x2) // 2
+   cy = (y1 + y2) // 2
 
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
+   # 🟢 Green box
+   cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+   cv2.putText(frame, f"ID {int(tid)}",
+   (x1, y1 - 8),
+   cv2.FONT_HERSHEY_SIMPLEX,
+   0.6, (0, 255, 0), 2)
 
-        time.sleep(5)
+   if dx1 < cx < dx2 and dy1 < cy < dy2:
+    valid_ids.add(tid)
 
-    cap.release()
-    cv2.destroyAllWindows()
+  if scan_triggered and not scanning:
+   scanning = True
+   scan_start = time.time()
+   flagged = False
+   primary_id = None
+   secondary_detect_time = None
+   scan_triggered = False
+
+  if scanning:
+   elapsed = time.time() - scan_start
+
+   if primary_id is None and len(valid_ids) >= 1:
+    primary_id = list(valid_ids)[0]
+
+   if primary_id is not None:
+    secondary_ids = valid_ids - {primary_id}
+   else:
+    secondary_ids = set()
+
+   if len(secondary_ids) > 0:
+    if secondary_detect_time is None:
+     secondary_detect_time = time.time()
+    elif time.time() - secondary_detect_time >= TOLERANCE_SECONDS:
+     flagged = True
+   else:
+    secondary_detect_time = None
+
+   cv2.putText(frame,
+   f"Scanning... {round(3 - elapsed, 1)}s",
+   (20, 40),
+   cv2.FONT_HERSHEY_SIMPLEX,
+   1, (0, 255, 255), 2)
+
+   if elapsed > 3:
+    scanning = False
+    readable_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    status = "UNAUTHORIZED" if flagged else "VERIFIED"
+    clip_url = None
+
+    # 🎥 Only upload if unauthorized
+    if flagged:
+     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+     filename = f"event_{ts}.mp4"
+     path = os.path.join("clips", filename)
+
+     h, w, _ = frame.shape
+     out = cv2.VideoWriter(
+      path,
+      cv2.VideoWriter_fourcc(*"mp4v"),
+      FPS,
+      (w, h)
+     )
+
+     for f in buffer:
+      out.write(f)
+
+     out.release()
+
+     upload_result = cloudinary.uploader.upload(
+      path,
+      resource_type="video"
+     )
+
+     clip_url = upload_result["secure_url"]
+
+    # ✅ ALWAYS send event
+    try:
+     requests.post(
+      "https://axentry-backend.onrender.com/insert",
+      json={
+       "timestamp": readable_time,
+       "status": status,
+       "clip_path": clip_url,
+       "camera_id": "CAM_01"
+      },
+      timeout=3
+     )
+    except Exception as e:
+     print("Cloud error:", e)
+
+    # Overlay result
+    if flagged:
+     last_status = "UNAUTHORIZED ENTRY DETECTED"
+     status_color = (0, 0, 255)
+    else:
+     last_status = "ACCESS VERIFIED"
+     status_color = (0, 200, 0)
+
+    status_display_until = time.time() + 3
+
+  if time.time() < status_display_until and last_status:
+   cv2.putText(frame,
+   last_status,
+   (20, 80),
+   cv2.FONT_HERSHEY_SIMPLEX,
+   1.1,
+   status_color,
+   3)
+
+  cv2.imshow("Axentry Access Verification", frame)
+
+  if cv2.waitKey(1) & 0xFF == ord("q"):
+   break
+
+ cap.release()
+ cv2.destroyAllWindows()
