@@ -111,18 +111,36 @@ def trigger_scan():
 
 @app.route("/events")
 def get_events():
- cursor.execute("SELECT * FROM events ORDER BY id DESC")
- rows = cursor.fetchall()
+    page = int(request.args.get("page", 1))
+    limit = int(request.args.get("limit", 10))
+    offset = (page - 1) * limit
 
- return jsonify([
- {
- "id": r[0],
- "timestamp": r[1],
- "status": r[2],
- "clip_path": r[3],
- "camera_id": r[4]
- } for r in rows
- ])
+    cursor.execute("SELECT COUNT(*) FROM events")
+    total = cursor.fetchone()[0]
+
+    cursor.execute("""
+        SELECT * FROM events
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+    """, (limit, offset))
+
+    rows = cursor.fetchall()
+
+    return jsonify({
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "events": [
+            {
+                "id": r[0],
+                "timestamp": r[1],
+                "status": r[2],
+                "clip_path": r[3],
+                "camera_id": r[4]
+            } for r in rows
+        ]
+    })
+
 
 @app.route("/dashboard")
 def dashboard():
